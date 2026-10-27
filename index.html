@@ -267,9 +267,10 @@ function renderNow(){
   const nx=plan[i+1]; $("nowNext").textContent = nx?`다음 ${nx[0]} · ${nx[1]}`:"오늘 끝. 내일 08:30에 봐요";
   const rec=days[todayKey]||{}, b=$("wakeBtn"), n=$("wakeNote");
   if(rec.wake){
-    b.disabled=true; b.textContent=`${rec.wake} 기상 완료`;
+    b.disabled=true; b.textContent=`${rec.wake} 기상 완료`+(rec.src==="sleepcycle"?" · 슬립 사이클":"");
     const diff=mins(rec.wake)-mins("08:30");
     n.textContent = diff<=15?"목표 안에 일어났어요. 오늘 하루 잡혔다.": diff<=60?`목표보다 ${diff}분 늦었어요. 헬스부터 그대로 가요.`:`목표보다 ${diff}분 늦었어요. 시간표 줄이지 말고 다음 주황 시각부터 맞춰요.`;
+    if(rec.sleepAt) n.textContent=`어젯밤 ${rec.sleepAt} 잠 → ${rec.wake} 기상 · ${Math.floor(rec.sleptMin/60)}시간 ${rec.sleptMin%60}분. `+n.textContent;
   } else { b.disabled=!db; b.textContent="일어났다 · 기상 찍기"; n.textContent=db?"목표 08:30 · 누르는 순간 시각이 기록돼요":"claude.ai 에 로그인한 상태에서 열면 기록이 저장돼요"; }
 }
 function renderChips(){
@@ -324,7 +325,21 @@ async function save(rec){
   try{ await db.collection("days").doc(todayKey).set(rec); }
   catch(e){ $("saveNote").textContent="저장이 안 됐어요. 잠시 뒤 다시 눌러 주세요."; }
 }
-function wake(){ if(!db) return; save({...(days[todayKey]||{}),date:todayKey,wake:hm(new Date())}); }
+// 슬립 사이클 → 건강 → 단축어가 복사해 둔 "SC|취침|기상" 을 폰 앱에서 기상 찍을 때 가져온다
+async function readSleepCycle(){
+  if(!db||!db.local||!navigator.clipboard||!navigator.clipboard.readText) return null;
+  try{ const t=await navigator.clipboard.readText(); const m=/SC\|(\d{1,2}:\d{2})\|(\d{1,2}:\d{2})/.exec(t||""); if(!m) return null;
+    const fix=x=>x.padStart(5,"0"); return {sleep:fix(m[1]),wake:fix(m[2])}; }catch(e){ return null; }
+}
+async function wake(){
+  if(!db) return; const rec={...(days[todayKey]||{}),date:todayKey}; const sc=await readSleepCycle();
+  if(sc && mins(sc.wake)>=240 && mins(sc.wake)<=mins(hm(new Date()))){
+    rec.wake=sc.wake; rec.sleepAt=sc.sleep; rec.src="sleepcycle";
+    let s=mins(sc.sleep); if(s<720) s+=1440; rec.sleptMin=mins(sc.wake)+1440-s;
+    if(s<=1500){ rec.done={...(rec.done||{}),sleep:sc.sleep}; }
+  } else rec.wake=hm(new Date());
+  save(rec);
+}
 function toggle(k){ if(!db) return; const rec=days[todayKey]||{}, done={...(rec.done||{})};
   if(done[k]) delete done[k]; else done[k]=hm(new Date()); save({...rec,date:todayKey,done}); }
 $("wakeBtn").onclick=wake;
