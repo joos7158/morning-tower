@@ -1,8 +1,5 @@
 <!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="관제탑">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
@@ -329,14 +326,24 @@ async function readSleepCycle(){
   try{ const t=await navigator.clipboard.readText(); const m=/SC\|(\d{1,2}:\d{2})\|(\d{1,2}:\d{2})/.exec(t||""); if(!m) return null;
     const fix=x=>x.padStart(5,"0"); return {sleep:fix(m[1]),wake:fix(m[2])}; }catch(e){ return null; }
 }
+function applySleepCycle(rec,sc){
+  if(!sc || mins(sc.wake)<240 || mins(sc.wake)>mins(hm(new Date()))) return false;
+  rec.wake=sc.wake; rec.sleepAt=sc.sleep; rec.src="sleepcycle";
+  let s=mins(sc.sleep); if(s<720) s+=1440; rec.sleptMin=mins(sc.wake)+1440-s;
+  if(s<=1500){ rec.done={...(rec.done||{}),sleep:sc.sleep}; }
+  return true;
+}
 async function wake(){
-  if(!db) return; const rec={...(days[todayKey]||{}),date:todayKey}; const sc=await readSleepCycle();
-  if(sc && mins(sc.wake)>=240 && mins(sc.wake)<=mins(hm(new Date()))){
-    rec.wake=sc.wake; rec.sleepAt=sc.sleep; rec.src="sleepcycle";
-    let s=mins(sc.sleep); if(s<720) s+=1440; rec.sleptMin=mins(sc.wake)+1440-s;
-    if(s<=1500){ rec.done={...(rec.done||{}),sleep:sc.sleep}; }
-  } else rec.wake=hm(new Date());
+  if(!db) return; const rec={...(days[todayKey]||{}),date:todayKey};
+  if(!applySleepCycle(rec,await readSleepCycle())) rec.wake=hm(new Date());
   save(rec);
+}
+// 자동화가 "관제탑?sc=SC|취침|기상" 주소로 열면 버튼 없이 바로 기록한다
+function sleepCycleFromUrl(){
+  try{ const q=new URLSearchParams(location.search).get("sc"); if(!q) return null;
+    history.replaceState(null,"",location.pathname);
+    const m=/SC\|(\d{1,2}:\d{2})\|(\d{1,2}:\d{2})/.exec(q); if(!m) return null;
+    const fix=x=>x.padStart(5,"0"); return {sleep:fix(m[1]),wake:fix(m[2])}; }catch(e){ return null; }
 }
 function toggle(k){ if(!db) return; const rec=days[todayKey]||{}, done={...(rec.done||{})};
   if(done[k]) delete done[k]; else done[k]=hm(new Date()); save({...rec,date:todayKey,done}); }
@@ -349,7 +356,10 @@ setInterval(()=>{ const n=new Date(), k=ymd(n); now=n; if(k!==todayKey){todayKey
   db = window.claude ? await window.claude.use("db") : null;
   const note=$("saveNote");
   if(!window.claude){ db={local:true}; try{days=JSON.parse(localStorage.getItem("mt_days")||"{}");}catch(e){days={};}
-    note.textContent="기록은 이 폰 안에 저장돼요."; renderAll(); return; }
+    note.textContent="기록은 이 폰 안에 저장돼요.";
+    const sc=sleepCycleFromUrl(), rec={...(days[todayKey]||{}),date:todayKey};
+    if(applySleepCycle(rec,sc)){ save(rec); note.textContent="슬립 사이클 기록이 자동으로 들어왔어요."; }
+    renderAll(); return; }
   if(!db){ note.textContent="기록은 claude.ai 에 로그인한 상태에서 열 때만 저장돼요."; renderAll(); return; }
   note.textContent="누르면 바로 저장돼요. 클로드도 이 기록을 읽어요.";
   db.collection("days").onSnapshot(snap=>{ const o={}; snap.docs.forEach(d=>{o[d.id]=d.data();}); days=o; renderAll(); },
